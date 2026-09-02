@@ -57,7 +57,8 @@ Express API  —  deployed on Render
    ├── auth · clients · quotes · invoices · jobs · dashboard · company
    │
    └── /api/ia ── quote drafting  ──┬── company's own quote history
-       (Gemini)   plan reading      ├── seeded market price book
+       (Gemini)   plan reading      ├── market price reference
+                                    ├── verification layer
                                     └── margin applied in code
    ▼
 Turso  (hosted libSQL — SQLite-compatible)
@@ -72,37 +73,46 @@ the browser produces the PDF and the system needs no PDF library.
 This is the part of the project I would most want to talk through.
 
 **The model never decides a price on its own.** Prices resolve through a fixed precedence: the
-company's own historical line items first (their real prices, used as-is), then a seeded market
-price book, and only then a model estimate, flagged as low confidence. Every generated line
+company's own historical line items first (their real prices, used as-is), then a market price
+reference, and only then a model estimate, flagged as low confidence. Every generated line
 reports which of the three it came from, so the user knows what to check.
+
+**A verification layer sits between the model and the user.** Generated lines are checked back
+against the company's own history: when the model estimates a price for work that has actually
+been quoted before, the real price replaces the estimate. That single substitution measurably
+raised the share of each quote backed by real data rather than inference.
 
 **Margin is applied in code, not by the model.** Published reference prices are execution cost
 without contractor margin, so a margin has to be added — by a configurable factor in the
 service, while the prompt explicitly forbids the model from adding one. If both applied it,
 every quote would come out inflated twice over.
 
-**Domain rules exist because the model got things wrong in specific, repeatable ways.** When the
+**Rules exist because the model got things wrong in specific, repeatable ways.** When the
 description says the client supplies the material, only labour is priced — without that rule the
-model priced material nobody was buying and roughly doubled the figure. Similarly, the minimum
-is per job rather than per line: an earlier version that put a floor under every line overvalued
-a real quote by 59%, because the company does several tasks in one visit and shares the travel
-cost between them.
+model priced material nobody was buying and roughly doubled the figure. Others came from the same
+route: an early pricing heuristic was measurably overvaluing jobs that bundle several tasks into
+one visit, and had to be replaced once the error was quantified rather than guessed at.
 
 **The accuracy is stated honestly, not flattered.** Measured against real quotes that were not
-used for calibration, the drafts came out +35%, +22% and −40%. Realistic precision is ±20–35%,
-and the error leans high on ordinary jobs, which is the safer direction to be wrong in. The −40%
-case was a quote deliberately priced aggressively; at the aggressive setting it lands within 4%.
+used for calibration, the drafts came out +35%, +22% and −40%. Realistic precision is ±20–35% —
+and that figure is the *floor*, measured on jobs with no comparable history to draw on. The error
+leans high on ordinary work, which is the safer direction to be wrong in, and the −40% case was a
+quote deliberately priced aggressively; at the aggressive setting it lands within 4%. The output
+is a draft for a human to adjust, not an autonomous pricer, and it is designed that way.
 
 **I chose not to chase a better number.** Tuning the prompt brought one quote to within 0.6% and
 broke the other two, to +59% and +97%. With three examples that is overfitting, so I stopped:
 tightening it properly needs 10 to 20 real quotes, not prompt edits. The mechanism that actually
 improves it is the history — every saved quote adds real prices to the top precedence level, so
-the market book is a starting crutch that becomes irrelevant on its own.
+the external reference is a starting crutch that becomes irrelevant on its own.
 
-**A negative result worth recording.** The original design had the model search the web for
-market prices when there was no history. It returns HTTP 429 on the free tier, because search
-grounding is a billed feature. The search was therefore done once, offline, and lives in a
-seeded price table.
+**Two negative results worth recording.** The original design had the model search the web for
+market prices when there was no history; it returns HTTP 429 on the free tier, because search
+grounding is a billed feature — so the lookup was done once, offline, and seeded. And semantic
+retrieval over the quote history, using embeddings to pull the most similar past line items, is
+implemented but switched off: in this domain the similarity ranking behaved badly and could leave
+the correct line item out entirely. Retrieval stays deterministic until something can be shown to
+beat it.
 
 **For floor plans: computer vision for geometry, the model for meaning.** Walls are found with
 classical CV I wrote from scratch in JavaScript — threshold, a morphological opening to strip
@@ -148,13 +158,18 @@ wrong is not an option.
 
 ## Evaluation and operations
 
-The AI features are covered by an evaluation harness rather than by impressions: fixtures plus
-suites for fiscal rules, totals, output format, plan reading, the price verifier and end-to-end
-integration. Results are written per model version, so upgrading the model is a comparison
-instead of an assumption — which is how a regression in a generated quote gets caught before a
+The AI features are covered by an evaluation harness rather than by impressions. On a single call
+it captures **both the model's raw output and the verified output**, which makes it possible to
+measure two different things: how much the model invents, and how much of that the verification
+layer actually catches. Cases can be replayed against a different model, or repeated to measure
+variance between runs, and results are written per model version — so upgrading the model is a
+comparison rather than an assumption, and a regression in a generated quote gets caught before a
 client sees it.
 
-Operationally there are scripts for a health check and for backups.
+On the operational side there is a backup routine and a pre-deploy health check that reads the
+production database without writing to it. That check exists because the test suite runs against a
+local database file while production talks to a hosted one over HTTP — and those are not the same
+thing, which is exactly the sort of difference that only shows up in production.
 
 ## Limitations and what I would do next
 
@@ -162,8 +177,8 @@ Operationally there are scripts for a health check and for backups.
   in normal use, but deleting the last invoice of a year would reuse a number. Moving the counter
   into a dedicated series table is the pending fix, and it is a correctness issue rather than a
   cosmetic one.
-- **Drafted prices are a starting point, not an answer** — ±20–35%, improving only as the
-  company's own history accumulates.
+- **Drafted prices are a starting point, not an answer** — and they improve as the company's own
+  history accumulates, which is the mechanism the design leans on.
 - **Windows and doors are not reliably separated from thin partitions** in wall detection, since a
   window frame is about the width of a light partition, so they are corrected by hand.
 - **The calculated floor area is approximate.** It depends on how closely the detected footprint
