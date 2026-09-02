@@ -8,7 +8,7 @@ clients, quotes, invoices and jobs.
 > the system holds real client and financial data. This page describes what I built, the
 > constraints I built it under, and why I made the decisions I made.
 
-`Node.js` · `Express` · `SQLite (better-sqlite3)` · `Vanilla JS (ES modules)` · `JWT + bcrypt` · `Zod` · `Helmet` · `Tailscale`
+`Node.js` · `Express` · `SQLite (better-sqlite3)` · `Vanilla JS (ES modules)` · `JWT + bcrypt` · `Zod` · `Helmet` · `Render`
 
 ---
 
@@ -25,10 +25,12 @@ been paid.
 
 The constraints were as real as the problem:
 
-- No budget for SaaS subscriptions or cloud hosting.
 - The people using it are not technical.
-- It has to work from the office PC, a laptop and a phone.
-- It handles client and financial data, so it must not sit exposed on the public internet.
+- It has to be reachable from anywhere — the office, a laptop, a phone on site — not tied to
+  one computer being switched on.
+- It holds client and financial data and it is reachable from the internet, so access control
+  has to be real rather than cosmetic.
+- It has to stay maintainable by one person, working on it occasionally.
 
 ## What it does
 
@@ -43,11 +45,11 @@ The constraints were as real as the problem:
 ## Architecture
 
 ```text
-Browser  (office PC · laptop · phone — all on a private network)
+Browser  (office PC · laptop · phone — from anywhere)
    │
-   │  httpOnly JWT cookie
+   │  httpOnly JWT cookie over HTTPS
    ▼
-Express API
+Express API  —  deployed on Render
    │   Helmet  ·  rate limiting  ·  Zod validation  ·  RBAC on every endpoint
    │
    ├── auth · clients · quotes · invoices · jobs · dashboard · company
@@ -65,24 +67,25 @@ browser produces the PDF and the system needs no PDF library.
 The interesting part of this project was never the CRUD. It was the constraints.
 
 **No framework and no build step.** The frontend is native ES modules and plain CSS. Nothing
-to compile, nothing to redeploy, no toolchain to keep alive. For a system that has to keep
-working for years with occasional maintenance from one person, a dependency-light stack is a
+to compile, nothing to keep in sync, no toolchain to maintain. For a system that has to keep
+working for years with occasional attention from one person, a dependency-light stack is a
 feature, not a limitation.
 
-**SQLite as a single file.** The whole database is one file on disk. That makes backups a file
-copy, which is something a non-technical user can actually be taught to do — and it removes an
-entire class of database administration from a business that has nobody to do it.
+**SQLite as a single file.** The entire database is one file, which keeps the operational
+surface small: no separate database service to provision, secure or pay for. For one
+maintainer and a handful of users that is the right trade — and it is easy to recognise the
+point at which it would stop being.
 
-**Security sized for a small business, but not skipped.** Passwords are hashed with bcrypt,
-sessions are JWTs in httpOnly cookies, every request body is validated with Zod, and Helmet and
-rate limiting are in front. Access control is role-based and enforced **per endpoint**, not in
-the UI: three roles (full administration, day-to-day operations without deleting or configuring,
-and read-only) map to an explicit permission matrix.
+**Deployed as a hosted service.** The platform runs on Render rather than on a machine in the
+office, so it is reachable from anywhere without anyone maintaining a server and without
+depending on one computer being switched on. The trade-off is that it is exposed to the
+internet — which is exactly why the security below is load-bearing rather than decorative.
 
-**A private network instead of a public server.** Rather than exposing the machine to the
-internet or paying for hosting, the system is reachable only over a private mesh VPN
-(Tailscale). Every device that needs it joins the network; nothing else can reach the server.
-No open ports, no public attack surface, no monthly cost.
+**Security that has to actually hold.** Passwords are hashed with bcrypt, sessions are JWTs in
+httpOnly cookies, every request body is validated with Zod, and Helmet and rate limiting sit in
+front. Authorisation is role-based and enforced **per endpoint**, never in the UI alone: three
+roles — full administration, day-to-day operations without deleting or configuring, and
+read-only — map to an explicit permission matrix.
 
 **Domain rules encoded, not improvised.** Invoice numbering is correlative and resets per
 year, VAT is applied and rounded consistently across quotes and invoices, and a quote converts
@@ -96,15 +99,14 @@ the clients actually need to receive.
 
 - **User management is still done directly in the database.** It works at this scale, but an
   admin screen for creating and deactivating users is the first thing I would add.
-- **Backups are manual.** A file copy is simple, but it depends on somebody remembering; an
-  automated scheduled copy is the obvious improvement.
+- **Backups need a deliberate routine.** A single-file database makes backups simple in
+  principle, but simple is not the same as automatic.
 - **No automated test suite.** The system was validated in use rather than in CI. For anything
   larger, or with more than one maintainer, that would not be acceptable.
-- **Plans, drawings and project documents still live outside the system.** A quote
-  describes work that is defined in files held elsewhere; bringing those into the
-  platform is the natural next step.
-- **Single-node by design.** SQLite and one machine are the right call for this business, and
-  the wrong call the moment it needs concurrent write-heavy access from many sites.
+- **Plans, drawings and project documents still live outside the system.** A quote describes
+  work that is defined in files held elsewhere; bringing those in is the natural next step.
+- **Single-node by design.** SQLite and a single service are the right call for this business,
+  and the wrong call the moment it needs concurrent write-heavy access from many places.
 
 ## Why this project matters to me
 
