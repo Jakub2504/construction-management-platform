@@ -8,7 +8,7 @@ clients, quotes, invoices and jobs.
 > the system holds real client and financial data. This page describes what I built, the
 > constraints I built it under, and why I made the decisions I made.
 
-`Node.js` · `Express` · `SQLite (better-sqlite3)` · `Vanilla JS (ES modules)` · `JWT + bcrypt` · `Zod` · `Helmet` · `Render`
+`Node.js` · `Express` · `libSQL / Turso` · `Vanilla JS (ES modules)` · `JWT + bcrypt` · `Zod` · `Helmet` · `Render`
 
 ---
 
@@ -55,7 +55,7 @@ Express API  —  deployed on Render
    ├── auth · clients · quotes · invoices · jobs · dashboard · company
    │
    ▼
-SQLite  (single file, better-sqlite3)
+Turso  (hosted libSQL — SQLite-compatible)
 ```
 
 The frontend is a small single-page app written in plain ES modules: a router, an API client,
@@ -71,10 +71,11 @@ to compile, nothing to keep in sync, no toolchain to maintain. For a system that
 working for years with occasional attention from one person, a dependency-light stack is a
 feature, not a limitation.
 
-**SQLite as a single file.** The entire database is one file, which keeps the operational
-surface small: no separate database service to provision, secure or pay for. For one
-maintainer and a handful of users that is the right trade — and it is easy to recognise the
-point at which it would stop being.
+**SQLite semantics, managed persistence.** The data model is SQLite-compatible, which
+keeps queries and migrations simple and easy to reason about, but the database itself is
+hosted (Turso) rather than a file sitting next to the application. The data is therefore
+not tied to the lifetime of the container the app runs in, and there is no database server
+for me to operate, secure or patch.
 
 **Deployed as a hosted service.** The platform runs on Render rather than on a machine in the
 office, so it is reachable from anywhere without anyone maintaining a server and without
@@ -99,14 +100,13 @@ the clients actually need to receive.
 
 - **User management is still done directly in the database.** It works at this scale, but an
   admin screen for creating and deactivating users is the first thing I would add.
-- **Backups need a deliberate routine.** A single-file database makes backups simple in
-  principle, but simple is not the same as automatic.
 - **No automated test suite.** The system was validated in use rather than in CI. For anything
   larger, or with more than one maintainer, that would not be acceptable.
 - **Plans, drawings and project documents still live outside the system.** A quote describes
   work that is defined in files held elsewhere; bringing those in is the natural next step.
-- **Single-node by design.** SQLite and a single service are the right call for this business,
-  and the wrong call the moment it needs concurrent write-heavy access from many places.
+- **Single service by design.** One application service plus a hosted database is the right
+  shape for this business, and the wrong shape the moment it has to serve many teams or
+  sites concurrently.
 
 ## Why this project matters to me
 
